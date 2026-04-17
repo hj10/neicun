@@ -55,8 +55,8 @@ class BackgroundAgent:
             if config.timed_cleanup:
                 result = cleanup_memory()
                 self._log(f"执行内存整理：{result}")
-            else:
-                self._log("定时释放已关闭，后台等待中")
+            elif self.once:
+                self._log("定时释放已关闭，单次后台执行结束")
 
             if self.once:
                 break
@@ -82,23 +82,27 @@ class KeepAliveSupervisor:
 
     def __init__(self) -> None:
         self.running = True
+        self.child: subprocess.Popen[str] | None = None
         signal.signal(signal.SIGTERM, self._stop)
         signal.signal(signal.SIGINT, self._stop)
 
     def _stop(self, *_: object) -> None:
         self.running = False
+        if self.child is not None and self.child.poll() is None:
+            self.child.terminate()
 
     def run(self) -> int:
         print("保活模式已启动（监控后台进程）。")
         restart_count = 0
         while self.running:
             cmd = [sys.executable, __file__, "--background"]
-            child = subprocess.Popen(cmd)
-            return_code = child.wait()
+            self.child = subprocess.Popen(cmd, text=True)
+            return_code = self.child.wait()
 
             if not self.running:
                 break
 
+            # 保持保活语义：无论是否正常退出，都继续拉起。
             restart_count += 1
             print(f"后台进程退出（code={return_code}），第 {restart_count} 次重启中...")
             time.sleep(2)
